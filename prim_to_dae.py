@@ -32,6 +32,54 @@ def make_box(pos, size, rot):
     verts = apply_transform(verts, pos, rot)
     return verts, faces
 
+def make_prism(pos, size, rot):
+    x, y, z = size[0]/2, size[1]/2, size[2]/2
+    verts = [
+        # bottom triangle
+        [ 0,  y, -z],
+        [ x, -y, -z],
+        [-x, -y, -z],
+        # top triangle
+        [ 0,  y,  z],
+        [ x, -y,  z],
+        [-x, -y,  z],
+    ]
+    faces = [
+        [0,2,1],
+        [3,4,5],
+        [0,1,4,3],
+        [1,2,5,4],
+        [2,0,3,5],
+    ]
+    verts = apply_transform(verts, pos, rot)
+    return verts, faces
+
+def make_cone(pos, size, rot, divisions=16):
+    verts = []
+    faces = []
+    r_x = size[0]/2
+    r_y = size[1]/2
+    h = size[2]
+    # apex at top
+    apex = [0, 0, h/2]
+    # base circle
+    base = []
+    for i in range(divisions):
+        angle = 2 * math.pi * i / divisions
+        base.append([r_x * math.cos(angle), r_y * math.sin(angle), -h/2])
+    verts.append(apex)
+    verts.extend(base)
+    # side faces
+    for i in range(divisions):
+        next_i = (i + 1) % divisions
+        faces.append([0, i+1, next_i+1])
+    # bottom cap
+    bottom = list(range(1, divisions+1))
+    bottom.reverse()
+    faces.append(bottom)
+    verts = apply_transform(verts, pos, rot)
+    return verts, faces
+
 def make_cylinder(pos, size, rot, divisions=16, hollow=0.0, path_cut_begin=0.0, path_cut_end=1.0):
     verts = []
     faces = []
@@ -106,16 +154,34 @@ def make_sphere(pos, size, rot, divisions=16):
     verts = apply_transform(verts, pos, rot)
     return verts, faces
 
-def make_prism(pos, size, rot):
-    x, y, z = size[0]/2, size[1]/2, size[2]/2
-    verts = [
-        [0,-y,-z],[x,y,-z],[-x,y,-z],
-        [0,-y, z],[x,y, z],[-x,y, z],
-    ]
-    faces = [
-        [0,1,2],[3,5,4],
-        [0,3,4,1],[1,4,5,2],[2,5,3,0],
-    ]
+def make_hemisphere(pos, size, rot, divisions=16):
+    verts = []
+    faces = []
+    r_x = size[0]/2
+    r_y = size[1]/2
+    r_z = size[2]/2
+    lat_steps = max(3, divisions//2)
+    lon_steps = max(3, divisions)
+    for i in range(lat_steps + 1):
+        lat = math.pi * (-0.5 + (i / lat_steps) * 0.5)
+        for j in range(lon_steps):
+            lon = 2 * math.pi * j / lon_steps
+            verts.append([
+                r_x * math.cos(lat) * math.cos(lon),
+                r_y * math.cos(lat) * math.sin(lon),
+                r_z * math.sin(lat)
+            ])
+    for i in range(lat_steps):
+        for j in range(lon_steps):
+            p1 = i * lon_steps + j
+            p2 = p1 + lon_steps
+            p3 = p2 + 1 if (j+1) < lon_steps else p2 - lon_steps + 1
+            p4 = p1 + 1 if (j+1) < lon_steps else p1 - lon_steps + 1
+            faces.append([p1, p2, p3, p4])
+    # flat bottom cap
+    base_start = 0
+    for i in range(1, lon_steps-1):
+        faces.append([base_start, base_start+i, base_start+i+1])
     verts = apply_transform(verts, pos, rot)
     return verts, faces
 
@@ -161,118 +227,4 @@ def make_tube(pos, size, rot, divisions=16):
             p1 = i * divisions + j
             p2 = ((i+1) % divisions) * divisions + j
             p3 = ((i+1) % divisions) * divisions + (j+1) % divisions
-            p4 = i * divisions + (j+1) % divisions
-            faces.append([p1, p2, p3, p4])
-    verts = apply_transform(verts, pos, rot)
-    return verts, faces
-
-def make_ring(pos, size, rot, divisions=16):
-    return make_torus(pos, size, rot, divisions)
-
-def normalize_positions(prims):
-    if not prims:
-        return prims
-    cx = sum(float(p["position"][0]) for p in prims) / len(prims)
-    cy = sum(float(p["position"][1]) for p in prims) / len(prims)
-    cz = sum(float(p["position"][2]) for p in prims) / len(prims)
-    for p in prims:
-        p["position"][0] = float(p["position"][0]) - cx
-        p["position"][1] = float(p["position"][1]) - cy
-        p["position"][2] = float(p["position"][2]) - cz
-    return prims
-
-def prims_to_dae(prims):
-    prims = normalize_positions(prims)
-    all_verts = []
-    all_faces = []
-    vert_offset = 0
-    for prim in prims:
-        ptype  = prim.get("type", "BOX").upper()
-        pos    = [float(x) for x in prim.get("position", [0,0,0])]
-        size   = [float(x) for x in prim.get("size", [0.5,0.5,0.5])]
-        rot    = [float(x) for x in prim.get("rotation", [0,0,0,1])]
-        divs   = int(prim.get("divisions", 16))
-        hollow = float(prim.get("hollow", 0.0))
-        pcut_b = float(prim.get("path_cut_begin", 0.0))
-        pcut_e = float(prim.get("path_cut_end", 1.0))
-        if ptype == "CYLINDER":
-            verts, faces = make_cylinder(pos, size, rot, divs, hollow, pcut_b, pcut_e)
-        elif ptype == "SPHERE":
-            verts, faces = make_sphere(pos, size, rot, divs)
-        elif ptype == "PRISM":
-            verts, faces = make_prism(pos, size, rot)
-        elif ptype == "TORUS":
-            verts, faces = make_torus(pos, size, rot, divs)
-        elif ptype == "TUBE":
-            verts, faces = make_tube(pos, size, rot, divs)
-        elif ptype == "RING":
-            verts, faces = make_ring(pos, size, rot, divs)
-        else:
-            verts, faces = make_box(pos, size, rot)
-        for face in faces:
-            all_faces.append([fi + vert_offset for fi in face])
-        all_verts.extend(verts)
-        vert_offset += len(verts)
-    return build_dae(all_verts, all_faces)
-
-def build_dae(verts, faces):
-    pos_parts = []
-    for v in verts:
-        pos_parts.append(str(round(v[0], 6)))
-        pos_parts.append(str(round(v[1], 6)))
-        pos_parts.append(str(round(v[2], 6)))
-    pos_str = " ".join(pos_parts)
-    triangles = []
-    for face in faces:
-        if len(face) == 3:
-            triangles.append(face)
-        elif len(face) == 4:
-            triangles.append([face[0], face[1], face[2]])
-            triangles.append([face[0], face[2], face[3]])
-        elif len(face) > 4:
-            for i in range(1, len(face)-1):
-                triangles.append([face[0], face[i], face[i+1]])
-    tri_parts = []
-    for t in triangles:
-        tri_parts.append(str(t[0]))
-        tri_parts.append(str(t[1]))
-        tri_parts.append(str(t[2]))
-    tri_str = " ".join(tri_parts)
-    vert_count = len(verts)
-    tri_count = len(triangles)
-    dae  = '<?xml version="1.0" encoding="utf-8"?>\n'
-    dae += '<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">\n'
-    dae += '  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>\n'
-    dae += '  <library_geometries>\n'
-    dae += '    <geometry id="mesh0" name="PrimMesh">\n'
-    dae += '      <mesh>\n'
-    dae += '        <source id="mesh0-positions">\n'
-    dae += '          <float_array id="mesh0-positions-array" count="' + str(vert_count*3) + '">' + pos_str + '</float_array>\n'
-    dae += '          <technique_common>\n'
-    dae += '            <accessor source="#mesh0-positions-array" count="' + str(vert_count) + '" stride="3">\n'
-    dae += '              <param name="X" type="float"/>\n'
-    dae += '              <param name="Y" type="float"/>\n'
-    dae += '              <param name="Z" type="float"/>\n'
-    dae += '            </accessor>\n'
-    dae += '          </technique_common>\n'
-    dae += '        </source>\n'
-    dae += '        <vertices id="mesh0-vertices">\n'
-    dae += '          <input semantic="POSITION" source="#mesh0-positions"/>\n'
-    dae += '        </vertices>\n'
-    dae += '        <triangles count="' + str(tri_count) + '">\n'
-    dae += '          <input semantic="VERTEX" source="#mesh0-vertices" offset="0"/>\n'
-    dae += '          <p>' + tri_str + '</p>\n'
-    dae += '        </triangles>\n'
-    dae += '      </mesh>\n'
-    dae += '    </geometry>\n'
-    dae += '  </library_geometries>\n'
-    dae += '  <library_visual_scenes>\n'
-    dae += '    <visual_scene id="Scene" name="Scene">\n'
-    dae += '      <node id="PrimMesh" name="PrimMesh" type="NODE">\n'
-    dae += '        <instance_geometry url="#mesh0"/>\n'
-    dae += '      </node>\n'
-    dae += '    </visual_scene>\n'
-    dae += '  </library_visual_scenes>\n'
-    dae += '  <scene><instance_visual_scene url="#Scene"/></scene>\n'
-    dae += '</COLLADA>'
-    return dae
+            p4 = i * divisions + (j+1) % divisio
