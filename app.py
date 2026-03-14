@@ -42,4 +42,14 @@ def convert():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+  import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+```
+5. Commit changes
+
+---
+
+Then go back to Railway and wait for the deploy to finish. It will give you a URL like:
+```
+https://sl-prim-to-mesh.up.railway.app
