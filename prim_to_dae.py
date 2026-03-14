@@ -181,6 +181,27 @@ def make_tube(pos, size, rot, divisions=16):
 def make_ring(pos, size, rot, divisions=16):
     return make_torus(pos, size, rot, divisions)
 
+def simplify_mesh(verts, faces, ratio):
+    """Create a simplified version of the mesh by reducing faces."""
+    if ratio >= 1.0:
+        return verts, faces
+    keep = max(4, int(len(faces) * ratio))
+    step = max(1, len(faces) // keep)
+    simplified = faces[::step]
+    used = set()
+    for f in simplified:
+        for idx in f:
+            used.add(idx)
+    old_to_new = {}
+    new_verts = []
+    for old_idx in sorted(used):
+        old_to_new[old_idx] = len(new_verts)
+        new_verts.append(verts[old_idx])
+    new_faces = []
+    for f in simplified:
+        new_faces.append([old_to_new[idx] for idx in f])
+    return new_verts, new_faces
+
 def normalize_positions(prims):
     if not prims:
         return prims
@@ -193,11 +214,65 @@ def normalize_positions(prims):
         p["position"][2] = float(p["position"][2]) - cz
     return prims
 
+def build_geometry(mesh_id, verts, faces):
+    """Build a single geometry block for the DAE file."""
+    triangles = []
+    for face in faces:
+        if len(face) == 3:
+            triangles.append(face)
+        elif len(face) == 4:
+            triangles.append([face[0], face[1], face[2]])
+            triangles.append([face[0], face[2], face[3]])
+        elif len(face) > 4:
+            for i in range(1, len(face)-1):
+                triangles.append([face[0], face[i], face[i+1]])
+
+    pos_parts = []
+    for v in verts:
+        pos_parts.append(str(round(v[0], 6)))
+        pos_parts.append(str(round(v[1], 6)))
+        pos_parts.append(str(round(v[2], 6)))
+    pos_str = " ".join(pos_parts)
+
+    tri_parts = []
+    for t in triangles:
+        tri_parts.append(str(t[0]))
+        tri_parts.append(str(t[1]))
+        tri_parts.append(str(t[2]))
+    tri_str = " ".join(tri_parts)
+
+    vert_count = len(verts)
+    tri_count = len(triangles)
+
+    g  = '    <geometry id="' + mesh_id + '" name="' + mesh_id + '">\n'
+    g += '      <mesh>\n'
+    g += '        <source id="' + mesh_id + '-positions">\n'
+    g += '          <float_array id="' + mesh_id + '-positions-array" count="' + str(vert_count*3) + '">' + pos_str + '</float_array>\n'
+    g += '          <technique_common>\n'
+    g += '            <accessor source="#' + mesh_id + '-positions-array" count="' + str(vert_count) + '" stride="3">\n'
+    g += '              <param name="X" type="float"/>\n'
+    g += '              <param name="Y" type="float"/>\n'
+    g += '              <param name="Z" type="float"/>\n'
+    g += '            </accessor>\n'
+    g += '          </technique_common>\n'
+    g += '        </source>\n'
+    g += '        <vertices id="' + mesh_id + '-vertices">\n'
+    g += '          <input semantic="POSITION" source="#' + mesh_id + '-positions"/>\n'
+    g += '        </vertices>\n'
+    g += '        <triangles count="' + str(tri_count) + '">\n'
+    g += '          <input semantic="VERTEX" source="#' + mesh_id + '-vertices" offset="0"/>\n'
+    g += '          <p>' + tri_str + '</p>\n'
+    g += '        </triangles>\n'
+    g += '      </mesh>\n'
+    g += '    </geometry>\n'
+    return g
+
 def prims_to_dae(prims):
     prims = normalize_positions(prims)
     all_verts = []
     all_faces = []
     vert_offset = 0
+
     for prim in prims:
         ptype   = prim.get("type", "BOX").upper()
         pos     = [float(x) for x in prim.get("position", [0,0,0])]
@@ -209,6 +284,7 @@ def prims_to_dae(prims):
         pcut_e  = float(prim.get("path_cut_end", 1.0))
         taper_x = float(prim.get("taper_x", 0.0))
         taper_y = float(prim.get("taper_y", 0.0))
+
         if ptype == "CYLINDER":
             verts, faces = make_cylinder(pos, size, rot, divs,
                                          hollow, pcut_b, pcut_e,
@@ -225,68 +301,40 @@ def prims_to_dae(prims):
             verts, faces = make_ring(pos, size, rot, divs)
         else:
             verts, faces = make_box(pos, size, rot)
+
         for face in faces:
             all_faces.append([fi + vert_offset for fi in face])
         all_verts.extend(verts)
         vert_offset += len(verts)
+
     return build_dae(all_verts, all_faces)
 
 def build_dae(verts, faces):
-    pos_parts = []
-    for v in verts:
-        pos_parts.append(str(round(v[0], 6)))
-        pos_parts.append(str(round(v[1], 6)))
-        pos_parts.append(str(round(v[2], 6)))
-    pos_str = " ".join(pos_parts)
-    triangles = []
-    for face in faces:
-        if len(face) == 3:
-            triangles.append(face)
-        elif len(face) == 4:
-            triangles.append([face[0], face[1], face[2]])
-            triangles.append([face[0], face[2], face[3]])
-        elif len(face) > 4:
-            for i in range(1, len(face)-1):
-                triangles.append([face[0], face[i], face[i+1]])
-    tri_parts = []
-    for t in triangles:
-        tri_parts.append(str(t[0]))
-        tri_parts.append(str(t[1]))
-        tri_parts.append(str(t[2]))
-    tri_str = " ".join(tri_parts)
-    vert_count = len(verts)
-    tri_count = len(triangles)
+    # generate 4 LOD levels
+    lod_ratios = [1.0, 0.5, 0.25, 0.1]
+    lod_names  = ["high", "medium", "low", "lowest"]
+
     dae  = '<?xml version="1.0" encoding="utf-8"?>\n'
     dae += '<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">\n'
     dae += '  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>\n'
     dae += '  <library_geometries>\n'
-    dae += '    <geometry id="mesh0" name="PrimMesh">\n'
-    dae += '      <mesh>\n'
-    dae += '        <source id="mesh0-positions">\n'
-    dae += '          <float_array id="mesh0-positions-array" count="' + str(vert_count*3) + '">' + pos_str + '</float_array>\n'
-    dae += '          <technique_common>\n'
-    dae += '            <accessor source="#mesh0-positions-array" count="' + str(vert_count) + '" stride="3">\n'
-    dae += '              <param name="X" type="float"/>\n'
-    dae += '              <param name="Y" type="float"/>\n'
-    dae += '              <param name="Z" type="float"/>\n'
-    dae += '            </accessor>\n'
-    dae += '          </technique_common>\n'
-    dae += '        </source>\n'
-    dae += '        <vertices id="mesh0-vertices">\n'
-    dae += '          <input semantic="POSITION" source="#mesh0-positions"/>\n'
-    dae += '        </vertices>\n'
-    dae += '        <triangles count="' + str(tri_count) + '">\n'
-    dae += '          <input semantic="VERTEX" source="#mesh0-vertices" offset="0"/>\n'
-    dae += '          <p>' + tri_str + '</p>\n'
-    dae += '        </triangles>\n'
-    dae += '      </mesh>\n'
-    dae += '    </geometry>\n'
+
+    for i, (ratio, name) in enumerate(zip(lod_ratios, lod_names)):
+        mesh_id = "mesh_" + name
+        lod_verts, lod_faces = simplify_mesh(verts, faces, ratio)
+        dae += build_geometry(mesh_id, lod_verts, lod_faces)
+
     dae += '  </library_geometries>\n'
     dae += '  <library_visual_scenes>\n'
     dae += '    <visual_scene id="Scene" name="Scene">\n'
-    dae += '      <node id="PrimMesh" name="PrimMesh" type="NODE">\n'
-    dae += '        <instance_geometry url="#mesh0"/>\n'
-    dae += '      </node>\n'
+
+    for name in lod_names:
+        mesh_id = "mesh_" + name
+        node_id = "node_" + name
+        dae += '      <node id="' + node_id + '" name="' + node_id + '" type="NODE">\n'
+        dae += '        <instance_geometry url="#' + mesh_id + '"/>\n'
+        dae += '      </node>\n'
+
     dae += '    </visual_scene>\n'
     dae += '  </library_visual_scenes>\n'
     dae += '  <scene><instance_visual_scene url="#Scene"/></scene>\n'
