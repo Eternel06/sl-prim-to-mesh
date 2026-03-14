@@ -1,342 +1,171 @@
-import math
+string BASE_URL = "https://sl-prim-to-mesh-production.up.railway.app";
 
-def rotate_vertex(v, q):
-    x, y, z = v
-    qx, qy, qz, qw = q
-    ix =  qw*x + qy*z - qz*y
-    iy =  qw*y + qz*x - qx*z
-    iz =  qw*z + qx*y - qy*x
-    iw = -qx*x - qy*y - qz*z
-    rx = ix*qw + iw*(-qx) + iy*(-qz) - iz*(-qy)
-    ry = iy*qw + iw*(-qy) + iz*(-qx) - ix*(-qz)
-    rz = iz*qw + iw*(-qz) + ix*(-qy) - iy*(-qx)
-    return [rx, ry, rz]
+string primTypeToStr(integer t) {
+    if (t == PRIM_TYPE_BOX)      return "BOX";
+    if (t == PRIM_TYPE_CYLINDER) return "CYLINDER";
+    if (t == PRIM_TYPE_SPHERE)   return "SPHERE";
+    if (t == PRIM_TYPE_TORUS)    return "TORUS";
+    if (t == PRIM_TYPE_TUBE)     return "TUBE";
+    if (t == PRIM_TYPE_RING)     return "RING";
+    if (t == PRIM_TYPE_PRISM)    return "PRISM";
+    return "BOX";
+}
 
-def apply_transform(verts, pos, rot):
-    result = []
-    for v in verts:
-        rv = rotate_vertex(v, rot)
-        result.append([rv[0]+pos[0], rv[1]+pos[1], rv[2]+pos[2]])
-    return result
+string fv(float f) {
+    integer cents = (integer)llRound(f * 100.0);
+    integer whole = cents / 100;
+    integer dec = cents % 100;
+    if (dec < 0) dec = -dec;
+    if (dec == 0) return (string)whole;
+    if (dec % 10 == 0) return (string)whole + "." + (string)(dec/10);
+    string d = (string)dec;
+    if (dec < 10) d = "0" + d;
+    return (string)whole + "." + d;
+}
 
-def make_box(pos, size, rot):
-    x, y, z = size[0]/2, size[1]/2, size[2]/2
-    verts = [
-        [-x,-y,-z],[x,-y,-z],[x,y,-z],[-x,y,-z],
-        [-x,-y, z],[x,-y, z],[x,y, z],[-x,y, z],
-    ]
-    faces = [
-        [0,1,2,3],[4,7,6,5],[0,4,5,1],
-        [2,6,7,3],[1,5,6,2],[0,3,7,4],
-    ]
-    verts = apply_transform(verts, pos, rot)
-    return verts, faces
+string fv4(float f) {
+    integer thou = (integer)llRound(f * 10000.0);
+    integer whole = thou / 10000;
+    integer dec = thou % 10000;
+    if (dec < 0) dec = -dec;
+    if (dec == 0) return (string)whole;
+    string d = (string)dec;
+    while (llStringLength(d) < 4) d = "0" + d;
+    while (llStringLength(d) > 1 && llGetSubString(d,-1,-1) == "0")
+        d = llGetSubString(d, 0, -2);
+    return (string)whole + "." + d;
+}
 
-def make_prism(pos, size, rot):
-    x, y, z = size[0]/2, size[1]/2, size[2]/2
-    verts = [
-        [ 0,  y, -z],[ x, -y, -z],[-x, -y, -z],
-        [ 0,  y,  z],[ x, -y,  z],[-x, -y,  z],
-    ]
-    faces = [
-        [0,2,1],[3,4,5],
-        [0,1,4,3],[1,2,5,4],[2,0,3,5],
-    ]
-    verts = apply_transform(verts, pos, rot)
-    return verts, faces
+string gSessionID = "";
+integer gCurrentPrim = 1;
+integer gTotalPrims = 0;
+integer gChunkSize = 3;
+key gRequestID;
+integer gState = 0;
 
-def make_cylinder(pos, size, rot, divisions=16, hollow=0.0,
-                  path_cut_begin=0.0, path_cut_end=1.0,
-                  taper_x=0.0, taper_y=0.0):
-    verts = []
-    faces = []
-    r_x = size[0]/2
-    r_y = size[1]/2
-    h = size[2]
-    cut_begin = path_cut_begin * 2 * math.pi
-    cut_end = path_cut_end * 2 * math.pi
-    angle_range = cut_end - cut_begin
-    steps = max(3, int(divisions * angle_range / (2 * math.pi)))
-    top_r_x = r_x * (1.0 - abs(taper_x))
-    top_r_y = r_y * (1.0 - abs(taper_y))
-    outer_bottom = []
-    outer_top = []
-    inner_bottom = []
-    inner_top = []
-    for i in range(steps + 1):
-        angle = cut_begin + angle_range * i / steps
-        cx = math.cos(angle)
-        cy = math.sin(angle)
-        outer_bottom.append([r_x * cx, r_y * cy, -h/2])
-        outer_top.append([top_r_x * cx, top_r_y * cy, h/2])
-        if hollow > 0:
-            inner_bottom.append([r_x * hollow * cx, r_y * hollow * cy, -h/2])
-            inner_top.append([top_r_x * hollow * cx, top_r_y * hollow * cy, h/2])
-    ob = 0
-    verts.extend(outer_bottom)
-    ot = len(verts)
-    verts.extend(outer_top)
-    for i in range(steps):
-        faces.append([ob+i, ob+i+1, ot+i+1, ot+i])
-    if hollow > 0:
-        ib = len(verts)
-        verts.extend(inner_bottom)
-        it2 = len(verts)
-        verts.extend(inner_top)
-        for i in range(steps):
-            faces.append([ib+i+1, ib+i, it2+i, it2+i+1])
-        for i in range(steps):
-            faces.append([ot+i, ot+i+1, it2+i+1, it2+i])
-        for i in range(steps):
-            faces.append([ob+i+1, ob+i, ib+i, ib+i+1])
-    else:
-        for i in range(1, steps-1):
-            faces.append([ob, ob+i+1, ob+i])
-        if top_r_x > 0.01 and top_r_y > 0.01:
-            for i in range(1, steps-1):
-                faces.append([ot, ot+i, ot+i+1])
-        else:
-            apex_idx = len(verts)
-            verts.append([0, 0, h/2])
-            for i in range(steps):
-                next_i = (i+1) % steps
-                faces.append([apex_idx, ob+i, ob+next_i])
-    verts = apply_transform(verts, pos, rot)
-    return verts, faces
+string buildChunk(integer from, integer to) {
+    string json = "[";
+    integer i;
+    for (i = from; i <= to; i++) {
+        vector pos;
+        vector size;
+        rotation rot;
+        integer primType;
+        float hollow;
+        float path_cut_begin;
+        float path_cut_end;
+        float taper_x;
+        float taper_y;
+        vector color;
+        float alpha;
 
-def make_sphere(pos, size, rot, divisions=16):
-    verts = []
-    faces = []
-    r_x = size[0]/2
-    r_y = size[1]/2
-    r_z = size[2]/2
-    lat_steps = max(3, divisions)
-    lon_steps = max(3, divisions)
-    for i in range(lat_steps + 1):
-        lat = math.pi * (-0.5 + i / lat_steps)
-        for j in range(lon_steps):
-            lon = 2 * math.pi * j / lon_steps
-            verts.append([
-                r_x * math.cos(lat) * math.cos(lon),
-                r_y * math.cos(lat) * math.sin(lon),
-                r_z * math.sin(lat)
-            ])
-    for i in range(lat_steps):
-        for j in range(lon_steps):
-            p1 = i * lon_steps + j
-            p2 = p1 + lon_steps
-            p3 = p2 + 1 if (j+1) < lon_steps else p2 - lon_steps + 1
-            p4 = p1 + 1 if (j+1) < lon_steps else p1 - lon_steps + 1
-            faces.append([p1, p2, p3, p4])
-    verts = apply_transform(verts, pos, rot)
-    return verts, faces
+        list typeData;
+        if (gTotalPrims == 1) {
+            pos      = llGetPos();
+            size     = llGetScale();
+            rot      = llGetRot();
+            typeData = llGetPrimitiveParams([PRIM_TYPE]);
+            list colorData = llGetPrimitiveParams([PRIM_COLOR, 0]);
+            color = llList2Vector(colorData, 0);
+            alpha = llList2Float(colorData, 1);
+        } else {
+            list xform = llGetLinkPrimitiveParams(i,
+                [PRIM_POSITION, PRIM_ROTATION, PRIM_SIZE]);
+            pos  = llList2Vector(xform, 0);
+            rot  = llList2Rot(xform, 1);
+            size = llList2Vector(xform, 2);
+            typeData = llGetLinkPrimitiveParams(i, [PRIM_TYPE]);
+            list colorData = llGetLinkPrimitiveParams(i, [PRIM_COLOR, 0]);
+            color = llList2Vector(colorData, 0);
+            alpha = llList2Float(colorData, 1);
+        }
 
-def make_torus(pos, size, rot, divisions=16):
-    verts = []
-    faces = []
-    R = size[0]/2
-    r = size[2]/4
-    for i in range(divisions):
-        phi = 2 * math.pi * i / divisions
-        for j in range(divisions):
-            theta = 2 * math.pi * j / divisions
-            x = (R + r * math.cos(theta)) * math.cos(phi)
-            y = (R + r * math.cos(theta)) * math.sin(phi)
-            z = r * math.sin(theta)
-            verts.append([x, y, z])
-    for i in range(divisions):
-        for j in range(divisions):
-            p1 = i * divisions + j
-            p2 = ((i+1) % divisions) * divisions + j
-            p3 = ((i+1) % divisions) * divisions + (j+1) % divisions
-            p4 = i * divisions + (j+1) % divisions
-            faces.append([p1, p2, p3, p4])
-    verts = apply_transform(verts, pos, rot)
-    return verts, faces
+        primType       = llList2Integer(typeData, 0);
+        path_cut_begin = llList2Float(typeData, 1);
+        path_cut_end   = llList2Float(typeData, 2);
+        hollow         = llList2Float(typeData, 3) / 100.0;
+        vector taperVec = llList2Vector(typeData, 5);
+        taper_x = taperVec.x;
+        taper_y = taperVec.y;
 
-def make_tube(pos, size, rot, divisions=16):
-    verts = []
-    faces = []
-    R = size[0]/2
-    rx = size[0]/4
-    ry = size[1]/4
-    for i in range(divisions):
-        phi = 2 * math.pi * i / divisions
-        for j in range(divisions):
-            theta = 2 * math.pi * j / divisions
-            x = (R + rx * math.cos(theta)) * math.cos(phi)
-            y = (R + ry * math.cos(theta)) * math.sin(phi)
-            z = rx * math.sin(theta)
-            verts.append([x, y, z])
-    for i in range(divisions):
-        for j in range(divisions):
-            p1 = i * divisions + j
-            p2 = ((i+1) % divisions) * divisions + j
-            p3 = ((i+1) % divisions) * divisions + (j+1) % divisions
-            p4 = i * divisions + (j+1) % divisions
-            faces.append([p1, p2, p3, p4])
-    verts = apply_transform(verts, pos, rot)
-    return verts, faces
+        string entry = "{";
+        entry += "\"type\":\"" + primTypeToStr(primType) + "\",";
+        entry += "\"position\":[" + fv(pos.x) + "," + fv(pos.y) + "," + fv(pos.z) + "],";
+        entry += "\"size\":[" + fv(size.x) + "," + fv(size.y) + "," + fv(size.z) + "],";
+        entry += "\"rotation\":[" + fv4(rot.x) + "," + fv4(rot.y) + "," + fv4(rot.z) + "," + fv4(rot.s) + "],";
+        entry += "\"hollow\":" + fv4(hollow) + ",";
+        entry += "\"path_cut_begin\":" + fv4(path_cut_begin) + ",";
+        entry += "\"path_cut_end\":" + fv4(path_cut_end) + ",";
+        entry += "\"taper_x\":" + fv4(taper_x) + ",";
+        entry += "\"taper_y\":" + fv4(taper_y) + ",";
+        entry += "\"color\":[" + fv4(color.x) + "," + fv4(color.y) + "," + fv4(color.z) + "],";
+        entry += "\"alpha\":" + fv4(alpha);
+        entry += "}";
+        if (i < to) entry += ",";
+        json += entry;
+    }
+    json += "]";
+    return json;
+}
 
-def make_ring(pos, size, rot, divisions=16):
-    return make_torus(pos, size, rot, divisions)
+sendChunk() {
+    integer to = gCurrentPrim + gChunkSize - 1;
+    if (to > gTotalPrims) to = gTotalPrims;
+    llOwnerSay("Sending prims " + (string)gCurrentPrim + " to "
+               + (string)to + " of " + (string)gTotalPrims + "...");
+    string chunk = buildChunk(gCurrentPrim, to);
+    string encoded = llEscapeURL(chunk);
+    string url = BASE_URL + "/chunk?sid=" + gSessionID + "&data=" + encoded;
+    gRequestID = llHTTPRequest(url,
+        [HTTP_METHOD, "GET", HTTP_VERIFY_CERT, FALSE], "");
+    gCurrentPrim = to + 1;
+}
 
-def simplify_mesh(verts, faces, ratio):
-    """Create a simplified version of the mesh by reducing faces."""
-    if ratio >= 1.0:
-        return verts, faces
-    keep = max(4, int(len(faces) * ratio))
-    step = max(1, len(faces) // keep)
-    simplified = faces[::step]
-    used = set()
-    for f in simplified:
-        for idx in f:
-            used.add(idx)
-    old_to_new = {}
-    new_verts = []
-    for old_idx in sorted(used):
-        old_to_new[old_idx] = len(new_verts)
-        new_verts.append(verts[old_idx])
-    new_faces = []
-    for f in simplified:
-        new_faces.append([old_to_new[idx] for idx in f])
-    return new_verts, new_faces
+default {
+    state_entry() {
+        llOwnerSay("Prim to Mesh v4 ready! Prims: "
+                   + (string)llGetNumberOfPrims());
+    }
 
-def normalize_positions(prims):
-    if not prims:
-        return prims
-    cx = sum(float(p["position"][0]) for p in prims) / len(prims)
-    cy = sum(float(p["position"][1]) for p in prims) / len(prims)
-    cz = sum(float(p["position"][2]) for p in prims) / len(prims)
-    for p in prims:
-        p["position"][0] = float(p["position"][0]) - cx
-        p["position"][1] = float(p["position"][1]) - cy
-        p["position"][2] = float(p["position"][2]) - cz
-    return prims
+    touch_start(integer nd) {
+        if (llDetectedKey(0) != llGetOwner()) return;
+        gTotalPrims  = llGetNumberOfPrims();
+        gCurrentPrim = 1;
+        gState       = 1;
+        llOwnerSay("Starting conversion of "
+                   + (string)gTotalPrims + " prims...");
+        gRequestID = llHTTPRequest(
+            BASE_URL + "/start",
+            [HTTP_METHOD, "GET", HTTP_VERIFY_CERT, FALSE], "");
+    }
 
-def build_geometry(mesh_id, verts, faces):
-    """Build a single geometry block for the DAE file."""
-    triangles = []
-    for face in faces:
-        if len(face) == 3:
-            triangles.append(face)
-        elif len(face) == 4:
-            triangles.append([face[0], face[1], face[2]])
-            triangles.append([face[0], face[2], face[3]])
-        elif len(face) > 4:
-            for i in range(1, len(face)-1):
-                triangles.append([face[0], face[i], face[i+1]])
-
-    pos_parts = []
-    for v in verts:
-        pos_parts.append(str(round(v[0], 6)))
-        pos_parts.append(str(round(v[1], 6)))
-        pos_parts.append(str(round(v[2], 6)))
-    pos_str = " ".join(pos_parts)
-
-    tri_parts = []
-    for t in triangles:
-        tri_parts.append(str(t[0]))
-        tri_parts.append(str(t[1]))
-        tri_parts.append(str(t[2]))
-    tri_str = " ".join(tri_parts)
-
-    vert_count = len(verts)
-    tri_count = len(triangles)
-
-    g  = '    <geometry id="' + mesh_id + '" name="' + mesh_id + '">\n'
-    g += '      <mesh>\n'
-    g += '        <source id="' + mesh_id + '-positions">\n'
-    g += '          <float_array id="' + mesh_id + '-positions-array" count="' + str(vert_count*3) + '">' + pos_str + '</float_array>\n'
-    g += '          <technique_common>\n'
-    g += '            <accessor source="#' + mesh_id + '-positions-array" count="' + str(vert_count) + '" stride="3">\n'
-    g += '              <param name="X" type="float"/>\n'
-    g += '              <param name="Y" type="float"/>\n'
-    g += '              <param name="Z" type="float"/>\n'
-    g += '            </accessor>\n'
-    g += '          </technique_common>\n'
-    g += '        </source>\n'
-    g += '        <vertices id="' + mesh_id + '-vertices">\n'
-    g += '          <input semantic="POSITION" source="#' + mesh_id + '-positions"/>\n'
-    g += '        </vertices>\n'
-    g += '        <triangles count="' + str(tri_count) + '">\n'
-    g += '          <input semantic="VERTEX" source="#' + mesh_id + '-vertices" offset="0"/>\n'
-    g += '          <p>' + tri_str + '</p>\n'
-    g += '        </triangles>\n'
-    g += '      </mesh>\n'
-    g += '    </geometry>\n'
-    return g
-
-def prims_to_dae(prims):
-    prims = normalize_positions(prims)
-    all_verts = []
-    all_faces = []
-    vert_offset = 0
-
-    for prim in prims:
-        ptype   = prim.get("type", "BOX").upper()
-        pos     = [float(x) for x in prim.get("position", [0,0,0])]
-        size    = [float(x) for x in prim.get("size", [0.5,0.5,0.5])]
-        rot     = [float(x) for x in prim.get("rotation", [0,0,0,1])]
-        divs    = int(prim.get("divisions", 16))
-        hollow  = float(prim.get("hollow", 0.0))
-        pcut_b  = float(prim.get("path_cut_begin", 0.0))
-        pcut_e  = float(prim.get("path_cut_end", 1.0))
-        taper_x = float(prim.get("taper_x", 0.0))
-        taper_y = float(prim.get("taper_y", 0.0))
-
-        if ptype == "CYLINDER":
-            verts, faces = make_cylinder(pos, size, rot, divs,
-                                         hollow, pcut_b, pcut_e,
-                                         taper_x, taper_y)
-        elif ptype == "SPHERE":
-            verts, faces = make_sphere(pos, size, rot, divs)
-        elif ptype == "PRISM":
-            verts, faces = make_prism(pos, size, rot)
-        elif ptype == "TORUS":
-            verts, faces = make_torus(pos, size, rot, divs)
-        elif ptype == "TUBE":
-            verts, faces = make_tube(pos, size, rot, divs)
-        elif ptype == "RING":
-            verts, faces = make_ring(pos, size, rot, divs)
-        else:
-            verts, faces = make_box(pos, size, rot)
-
-        for face in faces:
-            all_faces.append([fi + vert_offset for fi in face])
-        all_verts.extend(verts)
-        vert_offset += len(verts)
-
-    return build_dae(all_verts, all_faces)
-
-def build_dae(verts, faces):
-    # generate 4 LOD levels
-    lod_ratios = [1.0, 0.5, 0.25, 0.1]
-    lod_names  = ["high", "medium", "low", "lowest"]
-
-    dae  = '<?xml version="1.0" encoding="utf-8"?>\n'
-    dae += '<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">\n'
-    dae += '  <asset><unit name="meter" meter="1"/><up_axis>Z_UP</up_axis></asset>\n'
-    dae += '  <library_geometries>\n'
-
-    for i, (ratio, name) in enumerate(zip(lod_ratios, lod_names)):
-        mesh_id = "mesh_" + name
-        lod_verts, lod_faces = simplify_mesh(verts, faces, ratio)
-        dae += build_geometry(mesh_id, lod_verts, lod_faces)
-
-    dae += '  </library_geometries>\n'
-    dae += '  <library_visual_scenes>\n'
-    dae += '    <visual_scene id="Scene" name="Scene">\n'
-
-    for name in lod_names:
-        mesh_id = "mesh_" + name
-        node_id = "node_" + name
-        dae += '      <node id="' + node_id + '" name="' + node_id + '" type="NODE">\n'
-        dae += '        <instance_geometry url="#' + mesh_id + '"/>\n'
-        dae += '      </node>\n'
-
-    dae += '    </visual_scene>\n'
-    dae += '  </library_visual_scenes>\n'
-    dae += '  <scene><instance_visual_scene url="#Scene"/></scene>\n'
-    dae += '</COLLADA>'
-    return dae
+    http_response(key request_id, integer status, list metadata, string body) {
+        if (request_id != gRequestID) return;
+        if (status != 200) {
+            llOwnerSay("Error " + (string)status + ": " + body);
+            gState = 0;
+            return;
+        }
+        if (gState == 1) {
+            gSessionID = body;
+            llOwnerSay("Session started!");
+            gState = 2;
+            sendChunk();
+        } else if (gState == 2) {
+            if (gCurrentPrim <= gTotalPrims) {
+                sendChunk();
+            } else {
+                gState = 3;
+                llOwnerSay("Generating mesh...");
+                gRequestID = llHTTPRequest(
+                    BASE_URL + "/generate?sid=" + gSessionID,
+                    [HTTP_METHOD, "GET", HTTP_VERIFY_CERT, FALSE], "");
+            }
+        } else if (gState == 3) {
+            gState = 0;
+            llOwnerSay("Done! Opening browser...");
+            llLoadURL(llGetOwner(),
+                "Click to download your .dae mesh file!", body);
+        }
+    }
+}
