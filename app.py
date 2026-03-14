@@ -17,21 +17,37 @@ def home():
 @app.route("/convert", methods=["POST"])
 def convert():
     try:
-        data = request.get_json()
-        if not data:
+        # handle any content type — parse body manually
+        raw = request.get_data(as_text=True)
+
+        if not raw:
             return jsonify({"error": "No data received"}), 400
+
+        try:
+            data = json.loads(raw)
+        except Exception as e:
+            return jsonify({"error": "Invalid JSON: " + str(e)}), 400
+
         prims = data.get("prims", [])
+
         if not prims:
             return jsonify({"error": "No prims in data"}), 400
+
         dae_content = prims_to_dae(prims)
+
+        if not dae_content:
+            return jsonify({"error": "DAE generation failed"}), 500
+
         dae_bytes = io.BytesIO(dae_content.encode("utf-8"))
         dae_bytes.seek(0)
+
         return send_file(
             dae_bytes,
             mimetype="application/octet-stream",
             as_attachment=True,
             download_name="prim_mesh.dae"
         )
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
