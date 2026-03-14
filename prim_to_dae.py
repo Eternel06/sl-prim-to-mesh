@@ -1,234 +1,121 @@
 import math
 
-def make_box(pos, size, rotation):
-    x, y, z = size[0]/2, size[1]/2, size[2]/2
-    verts = [
-        [-x,-y,-z],[x,-y,-z],[x,y,-z],[-x,y,-z],
-        [-x,-y, z],[x,-y, z],[x,y, z],[-x,y, z],
-    ]
-    faces = [
-        [0,1,2,3],[4,5,6,7],[0,1,5,4],
-        [2,3,7,6],[1,2,6,5],[0,3,7,4],
-    ]
-    verts = apply_transform(verts, pos)
-    return verts, faces
+def rotate_vertex(v, q):
+    """Rotate a vertex by a quaternion rotation."""
+    x, y, z = v
+    qx, qy, qz, qw = q
 
-def make_cylinder(pos, size, rotation, divisions=16):
-    verts = []
-    faces = []
-    r_x, r_y, h = size[0]/2, size[1]/2, size[2]
-    for layer in [0, 1]:
-        z = -h/2 + layer * h
-        for i in range(divisions):
-            angle = 2 * math.pi * i / divisions
-            verts.append([r_x * math.cos(angle), r_y * math.sin(angle), z])
-    for i in range(divisions):
-        next_i = (i + 1) % divisions
-        faces.append([i, next_i, next_i + divisions, i + divisions])
-    faces.append(list(range(divisions)))
-    faces.append(list(range(divisions, divisions * 2)))
-    verts = apply_transform(verts, pos)
-    return verts, faces
+    # quaternion rotation formula
+    ix =  qw*x + qy*z - qz*y
+    iy =  qw*y + qz*x - qx*z
+    iz =  qw*z + qx*y - qy*x
+    iw = -qx*x - qy*y - qz*z
 
-def make_sphere(pos, size, rotation, divisions=16):
-    verts = []
-    faces = []
-    r_x, r_y, r_z = size[0]/2, size[1]/2, size[2]/2
-    for i in range(divisions + 1):
-        lat = math.pi * (-0.5 + i / divisions)
-        for j in range(divisions):
-            lon = 2 * math.pi * j / divisions
-            verts.append([
-                r_x * math.cos(lat) * math.cos(lon),
-                r_y * math.cos(lat) * math.sin(lon),
-                r_z * math.sin(lat)
-            ])
-    for i in range(divisions):
-        for j in range(divisions):
-            p1 = i * divisions + j
-            p2 = p1 + divisions
-            p3 = p2 + 1 if (j + 1) < divisions else p2 - divisions + 1
-            p4 = p1 + 1 if (j + 1) < divisions else p1 - divisions + 1
-            faces.append([p1, p2, p3, p4])
-    verts = apply_transform(verts, pos)
-    return verts, faces
+    rx = ix*qw + iw*(-qx) + iy*(-qz) - iz*(-qy)
+    ry = iy*qw + iw*(-qy) + iz*(-qx) - ix*(-qz)
+    rz = iz*qw + iw*(-qz) + ix*(-qy) - iy*(-qx)
 
-def apply_transform(verts, pos):
-    return [[v[0]+pos[0], v[1]+pos[1], v[2]+pos[2]] for v in verts]
+    return [rx, ry, rz]
 
-def normalize_positions(prims):
-    if not prims:
-        return prims
-    cx = sum(p["position"][0] for p in prims) / len(prims)
-    cy = sum(p["position"][1] for p in prims) / len(prims)
-    cz = sum(p["position"][2] for p in prims) / len(prims)
-    for p in prims:
-        p["position"][0] -= cx
-        p["position"][1] -= cy
-        p["position"][2] -= cz
-    return prims
-
-import math
-
-def make_box(pos, size, rotation):
-    x, y, z = size[0]/2, size[1]/2, size[2]/2
-    verts = [
-        [-x,-y,-z],[x,-y,-z],[x,y,-z],[-x,y,-z],
-        [-x,-y, z],[x,-y, z],[x,y, z],[-x,y, z],
-    ]
-    faces = [
-        [0,1,2,3],[4,5,6,7],[0,1,5,4],
-        [2,3,7,6],[1,2,6,5],[0,3,7,4],
-    ]
-    verts = apply_transform(verts, pos)
-    return verts, faces
-
-def make_cylinder(pos, size, rotation, divisions=16):
-    verts = []
-    faces = []
-    r_x, r_y, h = size[0]/2, size[1]/2, size[2]
-    for layer in [0, 1]:
-        z = -h/2 + layer * h
-        for i in range(divisions):
-            angle = 2 * math.pi * i / divisions
-            verts.append([r_x * math.cos(angle), r_y * math.sin(angle), z])
-    for i in range(divisions):
-        next_i = (i + 1) % divisions
-        faces.append([i, next_i, next_i + divisions, i + divisions])
-    faces.append(list(range(divisions)))
-    faces.append(list(range(divisions, divisions * 2)))
-    verts = apply_transform(verts, pos)
-    return verts, faces
-
-def make_sphere(pos, size, rotation, divisions=16):
-    verts = []
-    faces = []
-    r_x, r_y, r_z = size[0]/2, size[1]/2, size[2]/2
-    for i in range(divisions + 1):
-        lat = math.pi * (-0.5 + i / divisions)
-        for j in range(divisions):
-            lon = 2 * math.pi * j / divisions
-            verts.append([
-                r_x * math.cos(lat) * math.cos(lon),
-                r_y * math.cos(lat) * math.sin(lon),
-                r_z * math.sin(lat)
-            ])
-    for i in range(divisions):
-        for j in range(divisions):
-            p1 = i * divisions + j
-            p2 = p1 + divisions
-            p3 = p2 + 1 if (j + 1) < divisions else p2 - divisions + 1
-            p4 = p1 + 1 if (j + 1) < divisions else p1 - divisions + 1
-            faces.append([p1, p2, p3, p4])
-    verts = apply_transform(verts, pos)
-    return verts, faces
-
-def apply_transform(verts, pos):
-    return [[v[0]+pos[0], v[1]+pos[1], v[2]+pos[2]] for v in verts]
-
-def normalize_positions(prims):
-    if not prims:
-        return prims
-    cx = sum(float(p["position"][0]) for p in prims) / len(prims)
-    cy = sum(float(p["position"][1]) for p in prims) / len(prims)
-    cz = sum(float(p["position"][2]) for p in prims) / len(prims)
-    for p in prims:
-        p["position"][0] = float(p["position"][0]) - cx
-        p["position"][1] = float(p["position"][1]) - cy
-        p["position"][2] = float(p["position"][2]) - cz
-    return prims
-
-def prims_to_dae(prims):
-    prims = normalize_positions(prims)
-    all_verts = []
-    all_faces = []
-    vert_offset = 0
-    for prim in prims:
-        ptype = prim.get("type", "BOX").upper()
-        pos   = [float(x) for x in prim.get("position", [0,0,0])]
-        size  = [float(x) for x in prim.get("size", [0.5,0.5,0.5])]
-        rot   = prim.get("rotation", [0,0,0,1])
-        divs  = int(prim.get("divisions", 16))
-        if ptype == "CYLINDER":
-            verts, faces = make_cylinder(pos, size, rot, divs)
-        elif ptype == "SPHERE":
-            verts, faces = make_sphere(pos, size, rot, divs)
-        else:
-            verts, faces = make_box(pos, size, rot)
-        for face in faces:
-            all_faces.append([fi + vert_offset for fi in face])
-        all_verts.extend(verts)
-        vert_offset += len(verts)
-    dae = build_dae(all_verts, all_faces)
-    return dae
-
-def build_dae(verts, faces):
-    pos_parts = []
+def apply_transform(verts, pos, rot):
+    """Apply rotation then position to all vertices."""
+    result = []
     for v in verts:
-        pos_parts.append(str(round(v[0], 6)))
-        pos_parts.append(str(round(v[1], 6)))
-        pos_parts.append(str(round(v[2], 6)))
-    pos_str = " ".join(pos_parts)
+        rv = rotate_vertex(v, rot)
+        result.append([
+            rv[0] + pos[0],
+            rv[1] + pos[1],
+            rv[2] + pos[2]
+        ])
+    return result
 
-    triangles = []
-    for face in faces:
-        if len(face) == 3:
-            triangles.append(face)
-        elif len(face) == 4:
-            triangles.append([face[0], face[1], face[2]])
-            triangles.append([face[0], face[2], face[3]])
-        elif len(face) > 4:
-            for i in range(1, len(face) - 1):
-                triangles.append([face[0], face[i], face[i+1]])
+def make_box(pos, size, rot):
+    x, y, z = size[0]/2, size[1]/2, size[2]/2
+    verts = [
+        [-x,-y,-z],[x,-y,-z],[x,y,-z],[-x,y,-z],
+        [-x,-y, z],[x,-y, z],[x,y, z],[-x,y, z],
+    ]
+    faces = [
+        [0,1,2,3],[4,7,6,5],[0,4,5,1],
+        [2,6,7,3],[1,5,6,2],[0,3,7,4],
+    ]
+    verts = apply_transform(verts, pos, rot)
+    return verts, faces
 
-    tri_parts = []
-    for t in triangles:
-        tri_parts.append(str(t[0]))
-        tri_parts.append(str(t[1]))
-        tri_parts.append(str(t[2]))
-    tri_str = " ".join(tri_parts)
+def make_cylinder(pos, size, rot, divisions=16, hollow=0.0, path_cut_begin=0.0, path_cut_end=1.0):
+    verts = []
+    faces = []
+    r_x, r_y, h = size[0]/2, size[1]/2, size[2]
 
-    vert_count = len(verts)
-    tri_count = len(triangles)
+    cut_begin = path_cut_begin * 2 * math.pi
+    cut_end   = path_cut_end   * 2 * math.pi
+    angle_range = cut_end - cut_begin
+    steps = max(3, int(divisions * angle_range / (2 * math.pi)))
 
-    dae = '<?xml version="1.0" encoding="utf-8"?>\n'
-    dae += '<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">\n'
-    dae += '  <asset>\n'
-    dae += '    <unit name="meter" meter="1"/>\n'
-    dae += '    <up_axis>Z_UP</up_axis>\n'
-    dae += '  </asset>\n'
-    dae += '  <library_geometries>\n'
-    dae += '    <geometry id="mesh0" name="PrimMesh">\n'
-    dae += '      <mesh>\n'
-    dae += '        <source id="mesh0-positions">\n'
-    dae += '          <float_array id="mesh0-positions-array" count="' + str(vert_count * 3) + '">' + pos_str + '</float_array>\n'
-    dae += '          <technique_common>\n'
-    dae += '            <accessor source="#mesh0-positions-array" count="' + str(vert_count) + '" stride="3">\n'
-    dae += '              <param name="X" type="float"/>\n'
-    dae += '              <param name="Y" type="float"/>\n'
-    dae += '              <param name="Z" type="float"/>\n'
-    dae += '            </accessor>\n'
-    dae += '          </technique_common>\n'
-    dae += '        </source>\n'
-    dae += '        <vertices id="mesh0-vertices">\n'
-    dae += '          <input semantic="POSITION" source="#mesh0-positions"/>\n'
-    dae += '        </vertices>\n'
-    dae += '        <triangles count="' + str(tri_count) + '">\n'
-    dae += '          <input semantic="VERTEX" source="#mesh0-vertices" offset="0"/>\n'
-    dae += '          <p>' + tri_str + '</p>\n'
-    dae += '        </triangles>\n'
-    dae += '      </mesh>\n'
-    dae += '    </geometry>\n'
-    dae += '  </library_geometries>\n'
-    dae += '  <library_visual_scenes>\n'
-    dae += '    <visual_scene id="Scene" name="Scene">\n'
-    dae += '      <node id="PrimMesh" name="PrimMesh" type="NODE">\n'
-    dae += '        <instance_geometry url="#mesh0"/>\n'
-    dae += '      </node>\n'
-    dae += '    </visual_scene>\n'
-    dae += '  </library_visual_scenes>\n'
-    dae += '  <scene>\n'
-    dae += '    <instance_visual_scene url="#Scene"/>\n'
-    dae += '  </scene>\n'
-    dae += '</COLLADA>'
-    return dae
+    outer_bottom = []
+    outer_top    = []
+    inner_bottom = []
+    inner_top    = []
+
+    for i in range(steps + 1):
+        angle = cut_begin + angle_range * i / steps
+        cx = math.cos(angle)
+        cy = math.sin(angle)
+        outer_bottom.append([r_x * cx, r_y * cy, -h/2])
+        outer_top.append   ([r_x * cx, r_y * cy,  h/2])
+        if hollow > 0:
+            inner_bottom.append([r_x * hollow * cx, r_y * hollow * cy, -h/2])
+            inner_top.append   ([r_x * hollow * cx, r_y * hollow * cy,  h/2])
+
+    base = len(verts)
+    verts.extend(outer_bottom)
+    verts.extend(outer_top)
+    ob = base
+    ot = base + len(outer_bottom)
+
+    # outer side faces
+    for i in range(steps):
+        faces.append([ob+i, ob+i+1, ot+i+1, ot+i])
+
+    if hollow > 0:
+        ib = len(verts)
+        verts.extend(inner_bottom)
+        it_ = len(verts)
+        verts.extend(inner_top)
+
+        # inner side faces
+        for i in range(steps):
+            faces.append([ib+i+1, ib+i, it_+i, it_+i+1])
+
+        # top cap
+        for i in range(steps):
+            faces.append([ot+i, ot+i+1, it_+i+1, it_+i])
+
+        # bottom cap
+        for i in range(steps):
+            faces.append([ob+i+1, ob+i, ib+i, ib+i+1])
+
+        # end caps for path cut
+        if path_cut_begin > 0 or path_cut_end < 1:
+            faces.append([ob, ot, it_[0], ib])
+            faces.append([ob+steps, ib+steps, it_+steps, ot+steps])
+    else:
+        # solid caps
+        for i in range(1, steps-1):
+            faces.append([ot, ot+i, ot+i+1])
+            faces.append([ob, ob+i+1, ob+i])
+
+    verts = apply_transform(verts, pos, rot)
+    return verts, faces
+
+def make_sphere(pos, size, rot, divisions=16, hollow=0.0, path_cut_begin=0.0, path_cut_end=1.0):
+    verts = []
+    faces = []
+    r_x, r_y, r_z = size[0]/2, size[1]/2, size[2]/2
+
+    lat_begin = -math.pi/2 + path_cut_begin * math.pi
+    lat_end   = -math.pi/2 + path_cut_end   * math.pi
+    lat_steps = max(3, divisions)
+    lon_steps = max(3, divisions)
+
+    for i in range(lat_
